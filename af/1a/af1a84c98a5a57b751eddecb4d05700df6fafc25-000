@@ -1,0 +1,33 @@
+import AppKit
+import Foundation
+import ImageIO
+
+// 19 October 2026, 17:54 CEST: Detect full-image retention and verify real bounded image output.
+func verify(_ condition: @autoclosure () -> Bool, _ message: String) {
+  guard condition() else { fputs("FAIL: \(message)\n", stderr); exit(1) }
+}
+weak var original: NSImage?
+var resized: NSImage?
+autoreleasepool {
+  let source = NSImage(size: NSSize(width: 1600, height: 1200), flipped: false) { rect in
+    NSColor.systemRed.setFill()
+    rect.fill()
+    return true
+  }
+  original = source
+  resized = source.resized(to: NSSize(width: 160, height: 120))
+}
+verify(original == nil, "resized preview retains the original image")
+verify(resized?.size == NSSize(width: 160, height: 120), "wrong output size")
+let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 1600, pixelsHigh: 1200,
+ bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+ colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+let data = bitmap.representation(using: .png, properties: [:])!
+if CommandLine.arguments.contains("--downsample") {
+  let output = ImageMemoryPolicy.downsample(data, to: NSSize(width: 200, height: 150), scale: 2)!
+  let cg = output.cgImage(forProposedRect: nil, context: nil, hints: nil)!
+  verify(cg.width == 400 && cg.height == 300, "downsample must fit the configured pixel budget")
+  verify(ImageMemoryPolicy.downsample(Data(), to: NSSize(width: 100, height: 100)) == nil,
+    "invalid image must fail safely")
+}
+print("PASS: original released; resized image and bounded thumbnail verified")

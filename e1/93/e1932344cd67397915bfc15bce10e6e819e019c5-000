@@ -1,0 +1,72 @@
+import AppKit
+import ImageIO
+
+// 19 October 2026, 17:51 CEST: Bound preview allocations without retaining full-resolution sources.
+enum ImageMemoryPolicy {
+  static let defaultPreviewMaxPixels = 2048.0
+  static let defaultThumbnailScale = 2.0
+  static var previewMaxPixels: CGFloat {
+    let value = UserDefaults.standard.object(forKey: "previewMaxPixels") as? Double ?? defaultPreviewMaxPixels
+    return CGFloat(min(4096, max(512, value)))
+  }
+  static var thumbnailScale: CGFloat {
+    let value = UserDefaults.standard.object(forKey: "thumbnailScale") as? Double ?? defaultThumbnailScale
+    return CGFloat(min(2, max(1, value)))
+  }
+  static var releasePreviewsWhenHidden: Bool {
+    UserDefaults.standard.object(forKey: "releasePreviewsWhenHidden") as? Bool ?? true
+  }
+  static func downsample(_ data: Data, to bounds: NSSize, scale: CGFloat = 1) -> NSImage? {
+    autoreleasepool {
+      let options = [kCGImageSourceShouldCache: false] as CFDictionary
+      guard let source = CGImageSourceCreateWithData(data as CFData, options),
+            let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+            let width = properties[kCGImagePropertyPixelWidth] as? NSNumber,
+            let height = properties[kCGImagePropertyPixelHeight] as? NSNumber,
+            width.doubleValue > 0, height.doubleValue > 0 else { return nil }
+      let w = CGFloat(width.doubleValue), h = CGFloat(height.doubleValue)
+      let factor = min(1, min(bounds.width * scale / w, bounds.height * scale / h))
+      let maxPixels = max(1, Int(ceil(max(w, h) * factor)))
+      let thumbnailOptions: [CFString: Any] = [
+        kCGImageSourceCreateThumbnailFromImageAlways: true,
+        kCGImageSourceCreateThumbnailWithTransform: true,
+        kCGImageSourceThumbnailMaxPixelSize: maxPixels,
+        kCGImageSourceShouldCacheImmediately: true
+      ]
+      guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbnailOptions as CFDictionary) else {
+        return nil
+      }
+      return NSImage(cgImage: image, size: NSSize(width: CGFloat(image.width) / scale,
+                                                height: CGFloat(image.height) / scale))
+    }
+  }
+}
+
+
+import AppKit.NSImage
+
+// Based on https://stackoverflow.com/questions/73062803/resizing-nsimage-keeping-aspect-ratio-reducing-the-image-size-while-trying-to-sc.
+extension NSImage {
+  func resized(to newSize: NSSize) -> NSImage {
+    let ratioX = newSize.width / size.width
+    let ratioY = newSize.height / size.height
+    let ratio = ratioX < ratioY ? ratioX : ratioY
+    let newHeight = size.height * ratio
+    let newWidth = size.width * ratio
+    let newSize = NSSize(width: newWidth, height: newHeight)
+
+    // Don't attempt to size up.
+    if newSize.height >= size.height {
+      return self
+    }
+
+    return NSImage(size: newSize, flipped: false) { destRect in
+      if let context = NSGraphicsContext.current {
+        context.imageInterpolation = .high
+        self.draw(in: destRect, from: NSRect.zero, operation: .copy, fraction: 1)
+      }
+
+      return true
+    }
+  }
+}

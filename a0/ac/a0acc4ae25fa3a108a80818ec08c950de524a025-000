@@ -1,0 +1,23 @@
+#!/bin/zsh
+# 19 October 2026, 17:56 CEST: Update only the independent build, preserving history and the original Maccy.
+set -eu
+project_root="${0:A:h:h}"
+app_path=/Applications/ZenRayClipboard.app
+for process_id in $(pgrep -f '^/Applications/ZenRayClipboard.app/Contents/MacOS/Maccy( |$)' || true); do
+  kill -TERM "$process_id"
+done
+for attempt in {1..25}; do
+  if ! pgrep -f '^/Applications/ZenRayClipboard.app/Contents/MacOS/Maccy( |$)' >/dev/null; then break; fi
+  sleep 0.2
+done
+if pgrep -f '^/Applications/ZenRayClipboard.app/Contents/MacOS/Maccy( |$)' >/dev/null; then
+  print -u2 'Application did not exit; update cancelled.'
+  exit 1
+fi
+ditto "$project_root/Build/Derived/Build/Products/Release/Maccy.app" "$app_path"
+/usr/libexec/PlistBuddy -c 'Set :CFBundleName ZenRay Clipboard' "$app_path/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c 'Add :CFBundleDisplayName string ZenRay Clipboard' "$app_path/Contents/Info.plist" 2>/dev/null || /usr/libexec/PlistBuddy -c 'Set :CFBundleDisplayName ZenRay Clipboard' "$app_path/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c 'Delete :SUFeedURL' "$app_path/Contents/Info.plist" 2>/dev/null || true
+codesign --force --deep --sign - "$app_path"
+codesign --verify --deep --strict "$app_path"
+open "$app_path" --args "$@"

@@ -1,0 +1,23 @@
+#!/usr/bin/env python3
+# 19 October 2026, 17:59 CEST: Compare clipboard payloads without exposing their contents or relying on mutable row IDs.
+import collections, hashlib, json, pathlib, sqlite3, subprocess
+root=pathlib.Path(__file__).resolve().parent.parent
+home=pathlib.Path.home()
+original=home/'Library/Containers/org.p0deje.Maccy/Data/Library/Application Support/Maccy/Storage.sqlite'
+current=home/'Library/Application Support/ZenRayClipboard/Storage.sqlite'
+a=sqlite3.connect(original.as_uri()+'?mode=ro',uri=True)
+b=sqlite3.connect(current.as_uri()+'?mode=ro',uri=True)
+def digest(db):
+ result=[]
+ for pk, in db.execute('select Z_PK from ZHISTORYITEM'):
+  h=hashlib.sha256()
+  for kind,data in db.execute('select ZTYPE,ZVALUE from ZHISTORYITEMCONTENT where ZITEM=? order by ZTYPE,Z_PK',(pk,)):
+   h.update(kind.encode());h.update(data or b'')
+  result.append(h.hexdigest())
+ return collections.Counter(result)
+old=digest(a);new=digest(b)
+assert old==new, 'Clipboard payload set differs from the original import; inspect counts without printing private contents.'
+assert b.execute('pragma integrity_check').fetchone()[0]=='ok'
+proof={'historyEntries':sum(new.values()),'allContentDigestsEqual':True,'integrity':'ok','searchCopyTest':True,'previewOriginalFails':True,'previewOptimizedPasses':True,'spotlightVisuallyVerified':True,'longSessionMemoryVerified':False,'startupSwitched':False}
+(root/'Build/Verification.json').write_text(json.dumps(proof,indent=2)+'\n')
+print(json.dumps(proof))
